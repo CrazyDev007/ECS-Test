@@ -6,17 +6,19 @@ using Unity.Physics;
 using Unity.Collections;
 using static UnityEngine.EventSystems.EventTrigger;
 using Unity.Physics.Systems;
+using Unity.Burst;
 
+[AlwaysSynchronizeSystem]
 public class PickupSystem : JobComponentSystem
 {
-    private BeginInitializationEntityCommandBufferSystem bs;
+    private EndSimulationEntityCommandBufferSystem bs;
 
     private BuildPhysicsWorld bpw;
     private StepPhysicsWorld spw;
 
     protected override void OnCreate()
     {
-        bs = World.GetOrCreateSystem<BeginInitializationEntityCommandBufferSystem>();
+        bs = World.GetOrCreateSystem<EndSimulationEntityCommandBufferSystem>();
         bpw = World.GetOrCreateSystem<BuildPhysicsWorld>();
         spw = World.GetOrCreateSystem<StepPhysicsWorld>();
     }
@@ -25,28 +27,46 @@ public class PickupSystem : JobComponentSystem
         EntityCommandBuffer ECB = bs.CreateCommandBuffer();
 
 
-        TriggerJob triggerJob = new TriggerJob
-        {
-            speedEntities = GetComponentDataFromEntity<PlayerSpeedData>(),
-            entitiesToDelete = GetComponentDataFromEntity<DeleteTag>(),
-            commandBuffer = ECB
-        };
+        TriggerJob triggerJob = new TriggerJob();
+        triggerJob.speedEntities = GetComponentDataFromEntity<PlayerSpeedData>(true);
+        triggerJob.entitiesToDelete = GetComponentDataFromEntity<DeleteTag>(true);
+        triggerJob.commandBuffer = ECB;
+
         //
-        inputDeps = triggerJob.Schedule(spw.Simulation, ref bpw.PhysicsWorld, inputDeps);
-        bs.AddJobHandleForProducer(inputDeps);
-        return inputDeps;
+        JobHandle jobHandle = triggerJob.Schedule(spw.Simulation, ref bpw.PhysicsWorld, inputDeps);
+        //jobHandle.Complete();
+        bs.AddJobHandleForProducer(jobHandle);
+        return jobHandle;
     }
+
 
     private struct TriggerJob : ITriggerEventsJob
     {
-        public ComponentDataFromEntity<PlayerSpeedData> speedEntities;
+        [ReadOnly] public ComponentDataFromEntity<PlayerSpeedData> speedEntities;
         [ReadOnly] public ComponentDataFromEntity<DeleteTag> entitiesToDelete;
         public EntityCommandBuffer commandBuffer;
 
         public void Execute(Unity.Physics.TriggerEvent triggerEvent)
         {
-            TestEntityTrigger(triggerEvent.EntityA, triggerEvent.EntityB);
-            TestEntityTrigger(triggerEvent.EntityB, triggerEvent.EntityA);
+            Entity entityA = triggerEvent.EntityA;
+            Entity entityB = triggerEvent.EntityB;
+            Debug.Log("aaaaaaaaaaa");
+            /*if (entitiesToDelete.HasComponent(entityA) && entitiesToDelete.HasComponent(entityB))
+            {
+                return;
+            }
+
+            if (entitiesToDelete.HasComponent(entityA) && speedEntities.HasComponent(entityB))
+            {
+                Debug.Log("asdf");
+            }
+            else if (speedEntities.HasComponent(entityA) && entitiesToDelete.HasComponent(entityB))
+            {
+                Debug.Log("aassddff");
+            }*/
+
+            TestEntityTrigger(entityA, entityB);
+            TestEntityTrigger(entityB, entityA);
         }
 
         private void TestEntityTrigger(Entity entity1, Entity entity2)
@@ -58,7 +78,7 @@ public class PickupSystem : JobComponentSystem
                     return;
                     //DeleteTag deleteTag = entitiesToDelete[triggerev]
                 }
-                commandBuffer.AddComponent(entity2, new DeleteTag());
+                commandBuffer.DestroyEntity(entity2);
             }
         }
     }
